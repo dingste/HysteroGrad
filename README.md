@@ -66,10 +66,10 @@ for data, target in dataloader:
     loss.backward()
     
     # The step function returns the current system status
-    status, grad_norm, barrier = optimizer.step(loss, model)
+    status, grad_norm, h_width = optimizer.step()
     
     if i % 10 == 0:
-        print(f"Loss: {loss.item():.4f} | Status: {status} | Barrier: {barrier:.4f}")
+        print(f"Loss: {loss.item():.4f} | Status: {status} | Barrier: {h_width:.4f}")
 ```
 
 ---
@@ -82,20 +82,21 @@ On standard benchmarks (e.g., "Moons" dataset and CIFAR-10), HysteroGrad demonst
 ![Moons Validation](docs/images/hio_validation.png)
 
 *   **Top Plot:** Shows the Loss (blue) decreasing rapidly. The Hysteresis Barrier (red dashed line) grows over time as the system accumulates "internal time" ($\tau$).
-*   **Bottom Plot:** Displays the system's activity. The green areas indicate the **Liquid** state where updates occur. As the gradient norm (black) falls below the rising barrier, the system enters the **Frozen** state, effectively ignoring noise and preventing overfitting.
+*   **Bottom Plot:** Displays the system's activity. The green areas indicate the **Liquid** state where updates occur. As the gradient norm (black) falls below the rising barrier, the system enters the **Frozen** state.
 
 ### 2. CIFAR-10 (Image Classification)
-![CIFAR-10 Results](docs/images/cifar_results_v4.png)
+![CIFAR-10 Results](docs/images/cifar_results_v5.png)
 
-*   **Accuracy:** Training stabilizes as gradient norms are forced to interact with the hysteresis barrier.
-*   **Self-Regularization:** The rising hysteresis barrier acts as an automated early stopping mechanism.
+HIOptimizer demonstrates high efficiency on complex image data when paired with information-geometric scaling.
 
-**Recent Run Results (HIO v4 - Clipped & Scaled):**
-*   **Peak Accuracy:** 49.31% (20 Epochs)
+**Benchmark Run (Enhanced SimpleCNN - VGG Style):**
+*   **Model:** 3-Block CNN (64-256 channels) + BatchNorm.
+*   **Peak Accuracy:** **82.78%** (within 10 Epochs).
+*   **Computational Cost:** **~0.49 PFLOPs** total for 10 epochs.
 *   **Dynamics:** 
-    *   **Gradient Clipping (20.0):** Successfully capped the energy of the system.
-    *   **Hysteresis Scaling (5.0):** Raised the barrier significantly.
-    *   **Interaction:** The system energy and hysteresis barrier are now operating on the same magnitude (~12.0), creating a tense "Liquid-Solid" phase transition boundary, though finding the optimal freezing point requires further tuning.
+    *   **Status:** Remained "Liquid" throughout the run (no premature freezing).
+    *   **Gradient Clipping (2.0):** Stabilized the updates in the high-curvature feature space.
+    *   **Metric Scaling (1000x):** Successfully amplified the natural gradient signal to overcome the noise in early training.
 
 **Execution Command:**
 ```bash

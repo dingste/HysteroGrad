@@ -28,56 +28,96 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-# 2. Define Model
+# 2. Define Model (Enhanced SimpleCNN - VGG Style for High Capacity)
 class SimpleCNN(nn.Module):
     def __init__(self):
         super(SimpleCNN, self).__init__()
-        # Feature Extractor (Edges/Shapes)
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 6, 5),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(6, 16, 5),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2)
+        
+        def conv_block(in_c, out_c):
+            return nn.Sequential(
+                nn.Conv2d(in_c, out_c, 3, padding=1, bias=False),
+                nn.BatchNorm2d(out_c),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(out_c, out_c, 3, padding=1, bias=False),
+                nn.BatchNorm2d(out_c),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(2, 2)
+            )
+            
+                self.features = nn.Sequential(
+                    conv_block(3, 64),    # 32x32 -> 16x16
+                    conv_block(64, 128),  # 16x16 -> 8x8
+                    conv_block(128, 256), # 8x8 -> 4x4
+                    nn.MaxPool2d(4)       # 4x4 -> 1x1
+                )
+                
+                self.classifier = nn.Sequential(
+                    nn.Flatten(),
+                    nn.Linear(256, 10)
+                )
+        
+            def forward(self, x):
+                x = self.features(x)
+                x = self.classifier(x)
+                return x
+        
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {device}")
+        
+        model = SimpleCNN().to(device)
+        criterion = nn.CrossEntropyLoss()
+        
+        # FLOPs Counter
+        def count_flops(model, input_size):
+            flops = 0
+            def conv2d_flops(m, x, y):
+                nonlocal flops
+                h, w = y.shape[2], y.shape[3]
+                ops = 2 * m.kernel_size[0] * m.kernel_size[1] * m.in_channels * m.out_channels * h * w
+                flops += ops
+        
+            def linear_flops(m, x, y):
+                nonlocal flops
+                ops = 2 * m.in_features * m.out_features
+                flops += ops
+        
+            hooks = []
+            for m in model.modules():
+                if isinstance(m, nn.Conv2d):
+                    hooks.append(m.register_forward_hook(conv2d_flops))
+                elif isinstance(m, nn.Linear):
+                    hooks.append(m.register_forward_hook(linear_flops))
+        
+            # Dummy pass
+            with torch.no_grad():
+                dummy_input = torch.randn(1, *input_size).to(device)
+                model(dummy_input)
+        
+            for h in hooks:
+                h.remove()
+                
+            return flops
+        
+        # Calculate FLOPs per image
+        flops_per_img = count_flops(model, (3, 32, 32))
+        print(f"FLOPs per image: {flops_per_img / 1e9:.4f} GFLOPs")
+        
+        # 3. Layer-Specific Optimizer Setup (Aggressive HIO Optimization)
+        # Using high metric_scale to force strong natural gradient steps
+        optimizer = HIOptimizer([
+            {'params': model.features.parameters(), 'stiffening_factor': 0.02, 'lr': 0.08, 'metric_scale': 1000.0},
+            {'params': model.classifier.parameters(), 'stiffening_factor': 0.01, 'lr': 0.1, 'metric_scale': 100.0}
+        ],
+        adaptive_threshold=True,
+        grad_clip=2.0,
+        hysteresis_scale=1.2
         )
-        # Classifier (Logic)
-        self.classifier = nn.Sequential(
-            nn.Linear(16 * 5 * 5, 120),
-            nn.ReLU(),
-            nn.Linear(120, 84),
-            nn.ReLU(),
-            nn.Linear(84, 10)
-        )
-
-    def forward(self, x):
-        x = self.features(x)
-        x = x.view(-1, 16 * 5 * 5)
-        x = self.classifier(x)
-        return x
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-
-model = SimpleCNN().to(device)
-criterion = nn.CrossEntropyLoss()
-
-# 3. Layer-Specific Optimizer Setup
-# Updated for v4: grad_clip=20.0, hysteresis_scale=5.0
-# Features: stiff=0.05, metric_scale=100 
-# Classifier: stiff=0.01, metric_scale=10
-optimizer = HIOptimizer([
-    {'params': model.features.parameters(), 'stiffening_factor': 0.05, 'lr': 0.001, 'metric_scale': 100.0},
-    {'params': model.classifier.parameters(), 'stiffening_factor': 0.01, 'lr': 0.001, 'metric_scale': 10.0}
-], cooling_rate=0.95, initial_temp=1.0, adaptive_threshold=True, grad_clip=20.0, hysteresis_scale=5.0) 
-
-print("Optimizer initialized with Grad Clipping (20.0) & Hysteresis Scale (5.0).")
-
 # 4. Training Loop
-epochs = 20
+epochs = 10
 logs = []
 prev_accuracy = 0.0
 stagnation_counter = 0
+total_pflops = 0.0
 
 for epoch in range(epochs):
     model.train()
@@ -88,6 +128,7 @@ for epoch in range(epochs):
     
     for i, data in enumerate(trainloader, 0):
         inputs, labels = data[0].to(device), data[1].to(device)
+        batch_len = inputs.size(0)
 
         # Standard PyTorch Step
         optimizer.zero_grad()
@@ -98,13 +139,31 @@ for epoch in range(epochs):
         # HIO Step
         status, g_norm, h_width = optimizer.step()
         
+        # Update PFLOPs
+        # Total FLOPs = flops_per_img * batch_size * 3 (Forward + Backward approx 2x Forward)
+        # Usually Backward is ~2x Forward. So Total ~ 3x Forward.
+        current_flops = flops_per_img * batch_len * 3
+        total_pflops += current_flops / 1e15 # Convert to Peta FLOPs
+        
         running_loss += loss.item()
         epoch_losses.append(loss.item())
-        statuses.append(1 if status == "Liquid" else 0)
+        
+        # Parse Status for Activity Logging
+        if "Liquid" in status:
+            statuses.append(1.0)
+        elif "Viscous" in status:
+            try:
+                val = float(status.split('(')[1].strip(')'))
+                statuses.append(val)
+            except:
+                statuses.append(0.5)
+        else: # Frozen
+            statuses.append(0.0)
+
         norms.append(g_norm)
         
         if i % 100 == 99:
-            print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 100:.3f} | status: {status} | avg_h_width: {h_width:.4f} | norm: {g_norm:.4f}')
+            print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 100:.3f} | status: {status} | avg_h_width: {h_width:.4f} | norm: {g_norm:.4f} | PFLOPs: {total_pflops:.9f}')
             running_loss = 0.0
 
     # Validation
@@ -118,9 +177,12 @@ for epoch in range(epochs):
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
+            
+            # Count inference FLOPs? Usually negligible compared to training but technically adds up.
+            total_pflops += (flops_per_img * images.size(0)) / 1e15
 
     accuracy = 100 * correct / total
-    print(f'Accuracy of the network on the 10000 test images: {accuracy:.2f}%')
+    print(f'Accuracy of the network on the 10000 test images: {accuracy:.2f}% | Total PFLOPs: {total_pflops:.9f}')
 
     # Feedback Loop (Geometric Shock)
     if accuracy - prev_accuracy < 0.5:
@@ -153,7 +215,7 @@ plt.figure(figsize=(12, 10))
 plt.subplot(3, 1, 1)
 plt.plot(df['epoch'], df['accuracy'], label='Test Accuracy (%)', color='blue', marker='o')
 plt.ylabel('Accuracy (%)')
-plt.title('HIOptimizer (v4 - Clipping & Scaling) on CIFAR-10')
+plt.title('HIOptimizer (v5 - Inverted Geometric Coupling) on CIFAR-10')
 plt.legend(loc='upper left')
 
 # Plot 2: Gradient Norm
@@ -165,11 +227,11 @@ plt.legend()
 
 # Plot 3: Activity
 plt.subplot(3, 1, 3)
-plt.fill_between(df['epoch'], 0, df['activity'], color='green', alpha=0.3, label='Liquid Ratio')
+plt.fill_between(df['epoch'], 0, df['activity'], color='green', alpha=0.3, label='Liquid Ratio (Gate Avg)')
 plt.xlabel('Epochs')
 plt.ylabel('Activity Ratio')
 plt.legend()
 
 plt.tight_layout()
-plt.savefig('cifar_results_v4.png')
-print("Results saved to cifar_results_v4.png")
+plt.savefig('cifar_results_v5.png')
+print("Results saved to cifar_results_v5.png")

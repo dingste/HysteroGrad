@@ -44,10 +44,12 @@ for epoch in range(epochs):
     norms = []
     
     for bx, by in loader:
+        optimizer.zero_grad()
         outputs = model(bx)
         loss = criterion(outputs, by)
+        loss.backward()
         
-        status, g_norm, h_width = optimizer.step(loss, model)
+        status, g_norm, h_width = optimizer.step()
         
         epoch_loss += loss.item()
         statuses.append(1 if status == "Liquid" else 0)
@@ -58,8 +60,8 @@ for epoch in range(epochs):
     logs.append({
         'epoch': epoch,
         'loss': avg_loss,
-        'tau': optimizer.tau,
-        'hysterese': optimizer.hysterese_breite,
+        # 'tau': optimizer.tau, # Removed as it's internal per-group now
+        'hysterese': h_width,   # Use the returned value
         'activity': np.mean(statuses),
         'grad_norm': np.mean(norms)
     })
