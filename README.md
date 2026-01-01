@@ -7,14 +7,14 @@ HysteroGrad is a PyTorch-based optimizer that treats the neural network paramete
 
 ---
 
-## 🌌 Origin & Inspiration
+## Origin & Inspiration
 This project is a spin-off from theoretical research into **Quantum Mechanics** and **Information Geometry**. The core idea rests on the analogy between the accumulation of information in neural networks and path functionals in physical spaces.
 
 Just as a material "stiffens" under stress (work hardening), HysteroGrad stiffens the parameter space as the model accumulates information (\(\tau\)), eventually "freezing" the weights to protect the learned structure.
 
 ---
 
-## ⚡ Key Concepts
+## Key Concepts
 
 1.  **Metric Tensor (Fisher Information):** Uses Riemannian geometry to adapt the step size to the local curvature of the loss landscape.
 2.  **Internal Time (\(\tau\)):** A path functional that accumulates the "metric distance" traveled by the model during training.
@@ -23,7 +23,7 @@ Just as a material "stiffens" under stress (work hardening), HysteroGrad stiffen
 
 ---
 
-## 📐 Mathematical Core
+## Mathematical Core
 
 The update rule is governed by:
 
@@ -35,7 +35,7 @@ Where $G$ is the Fisher Information Matrix and $f(\tau)$ is the stiffening funct
 
 ---
 
-## 🚀 Installation
+## Installation
 
 ```bash
 git clone https://github.com/dingste/HysteroGrad.git
@@ -45,7 +45,7 @@ pip install -r requirements.txt
 
 ---
 
-## 💻 Quick Start
+## Quick Start
 
 ```python
 import torch
@@ -85,27 +85,95 @@ On standard benchmarks (e.g., "Moons" dataset and CIFAR-10), HysteroGrad demonst
 *   **Bottom Plot:** Displays the system's activity. The green areas indicate the **Liquid** state where updates occur. As the gradient norm (black) falls below the rising barrier, the system enters the **Frozen** state.
 
 ### 2. CIFAR-10 (Image Classification)
-![CIFAR-10 Results](docs/images/cifar_results_v5.png)
 
-HIOptimizer demonstrates high efficiency on complex image data when paired with information-geometric scaling.
+#### Compute-Efficiency Metric: Accuracy per PFLOP (APF)
 
-**Benchmark Run (Enhanced SimpleCNN - VGG Style):**
+##### Motivation
+
+When training deep neural networks on consumer-grade CPU hardware, wall-clock time and FLOPs
+quickly become the dominant constraints. Traditional reporting in terms of epochs or final accuracy
+alone does not capture how efficiently a model converts compute into generalization performance.
+
+To address this, we introduce **Accuracy per PFLOP (APF)** as an auxiliary efficiency metric.
+
+---
+
+##### Definition
+
+**Accuracy per PFLOP (APF)** is defined as:
+
+$$
+\text{APF} = \frac{\text{Test Accuracy (\%)}}{\text{Total Compute (PFLOPs)}}
+$$
+
+This metric quantifies how much test accuracy is achieved per unit of cumulative compute.
+
+---
+
+##### Interpretation
+
+- High APF values indicate **early learning efficiency**, i.e. rapid gains in accuracy for low compute cost.
+- APF naturally decreases over training time as marginal accuracy improvements become more expensive.
+- APF is **not intended to replace final accuracy**, but to complement it in compute-constrained settings.
+
+This metric is particularly relevant for:
+- CPU-bound training
+- consumer hardware
+- exploratory or low-budget experimentation
+- optimizer and training-dynamics research
+
+---
+
+##### Experimental Context
+
+- Hardware: Consumer-grade CPU
+- Precision: FP32
+- No mixed precision or GPU-specific optimizations
+- FLOPs are accumulated per forward + backward pass
+
+As a result, absolute APF values are **hardware- and setup-dependent** and should be compared
+*only within similar constraints*.
+
+---
+
+##### Example Results 
+
+#### - (Enhanced SimpleCNN - VGG Style, CPU)
+
 *   **Model:** 3-Block CNN (64-256 channels) + BatchNorm.
 *   **Peak Accuracy:** **82.78%** (within 10 Epochs).
 *   **Computational Cost:** **~0.49 PFLOPs** total for 10 epochs.
+* 	**APF:** 168.94 %/PFLOP.
 *   **Dynamics:** 
     *   **Status:** Remained "Liquid" throughout the run (no premature freezing).
     *   **Gradient Clipping (2.0):** Stabilized the updates in the high-curvature feature space.
     *   **Metric Scaling (1000x):** Successfully amplified the natural gradient signal to overcome the noise in early training.
 
-**Execution Command:**
-```bash
-PYTHONPATH=. python examples/cifar_test.py
-```
+
+#### - (WRN28-2, CPU)
+
+| Epoch | Test Accuracy (%) | Total PFLOPs | APF (% / PFLOP) |
+|------:|------------------:|-------------:|----------------:|
+| 1     | 52.27             | 0.0777       | 673.5           |
+| 2     | 62.16             | 0.1553       | 400.2           |
+| 3     | 64.78             | 0.2329       | 278.2           |
+| 5     | 68.10             | 0.3883       | 175.4           |
+| 10    | 69.40             | 0.7765       | 89.4            |
+
+These results illustrate that a large fraction of generalization performance is obtained
+within a relatively small compute budget.
 
 ---
 
-## ⚙️ Advanced Mechanics (v4)
+#### Limitations
+
+- APF depends on dataset, architecture, hardware, and precision.
+- FLOPs do not capture memory bandwidth or cache effects.
+- Estimated reference values should not be used for formal benchmarking.
+
+---
+
+## Advanced Mechanics 
 
 Based on thermodynamic principles, the optimizer now includes:
 
@@ -134,9 +202,12 @@ Based on thermodynamic principles, the optimizer now includes:
 
 ---
 
-## ⚖️ Comparison with Standard Optimizers
+## Comparison with Standard Optimizers
 
 HysteroGrad occupies a unique niche between traditional gradient descent and second-order methods.
+For contextual orientation, approximate efficiency ranges for common optimizers are shown below.
+These values are **estimates**, not direct measurements, and were **not obtained under identical
+hyperparameters or training schedules**.
 
 | Feature | **SGD (Stochastic Gradient Descent)** | **Adam / RMSprop** | **HysteroGrad** |
 | :--- | :--- | :--- | :--- |
@@ -146,15 +217,15 @@ HysteroGrad occupies a unique niche between traditional gradient descent and sec
 | **Stability** | Low (needs tuning) | Medium (can diverge) | **High (Self-Stabilizing)** |
 | **Stopping Criteria**| Manual (Epochs / Val Loss) | Manual | **Automatic (Hysteresis Barrier)** |
 | **Noise Handling** | Noise flows into updates | Smoothed by averaging | **Filtered by Schmitt-Trigger** |
+| **Typical APF Range (% / PFLOP)** | ~60 – 250 |  ~80 – 350   / ~70 – 300  | **~90 - 670** |
 
-### Why use HysteroGrad?
-*   **Physics-Inspired:** Treats training as a physical process, not just numerical optimization.
-*   **Automated Stability:** No need to guess when to stop training; the system tells you when it's "done" (Frozen).
-*   **Resource Efficient:** In the "Frozen" state, updates are skipped, saving compute in the final epochs.
+These reference values are provided **solely for qualitative comparison** and should not be
+interpreted as definitive performance rankings.
+
 
 ---
 
-## 🔮 Potential Applications
+## Potential Applications
 
 *   **Information Geometry:** Stabilizing Natural Gradient Descent in flat minima.
 *   **Neuromorphic Computing:** Algorithmic compatibility with memristive hardware (native hysteresis).
@@ -162,7 +233,7 @@ HysteroGrad occupies a unique niche between traditional gradient descent and sec
 
 ---
 
-## 🤝 Community & Feedback
+## Community & Feedback
 I developed this model out of a deep fascination for physical processes in information theory. 
 
 **I would love to hear how you use it!** Whether for academic research, generative art, or industrial applications—please open an issue or reach out. Your use cases help explore the bridge between Quantum Physics and AI.
