@@ -164,10 +164,10 @@ model = WideResNet(depth=28, widen_factor=2, dropout_rate=0.0).to(device)
 criterion = FocalLoss(gamma=1.0)
 
 optimizer = HIOptimizer([
-    {'params': model.parameters(), 'stiffening_factor': 0.003, 'lr': 0.05, 'metric_scale': 300.0, 'beta': 0.9, 'epsilon': 1e-8, 'cooling_rate': 0.995 },
+    {'params': model.parameters(), 'stiffening_factor': 0.005, 'lr': 0.05, 'metric_scale': 300.0, 'beta': 0.9, 'epsilon': 1e-8, 'cooling_rate': 0.995 },
 ],
 adaptive_threshold=True,
-grad_clip=1.5, 
+grad_clip=2.5, 
 hysteresis_scale=0.6
 )
 
@@ -207,11 +207,12 @@ flops_per_img = count_flops(model, (3, 32, 32))
 print(f"FLOPs per image: {flops_per_img / 1e9:.4f} GFLOPs")
 
 # 4. Training Loop
-epochs = 10
+epochs = 9
 logs = []
 prev_accuracy = 0.0
 stagnation_counter = 0
 total_pflops = 0.0
+cumulative_flops = 0.0
 
 for epoch in range(epochs):
     model.train()
@@ -235,7 +236,9 @@ for epoch in range(epochs):
         
         # Update PFLOPs
         current_flops = flops_per_img * batch_len * 3
-        total_pflops += current_flops / 1e15 # Convert to Peta FLOPs
+        #total_pflops += current_flops / 1e15
+        cumulative_flops += current_flops
+        tflops = cumulative_flops / 1e12 
         
         running_loss += loss.item()
         epoch_losses.append(loss.item())
@@ -255,7 +258,7 @@ for epoch in range(epochs):
         norms.append(g_norm)
         
         if i % 100 == 99:
-            print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 100:.3f} | status: {status} | avg_h_width: {h_width:.4f} | norm: {g_norm:.4f} | PFLOPs: {total_pflops:.9f}')
+            print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 100:.3f} | status: {status} | avg_h_width: {h_width:.4f} | norm: {g_norm:.4f}')
             running_loss = 0.0
 
     # Validation
@@ -270,10 +273,12 @@ for epoch in range(epochs):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
             
-            total_pflops += (flops_per_img * images.size(0)) / 1e15
+            total_pflops += (flops_per_img * images.size(0)) / 1e12
 
     accuracy = 100 * correct / total
-    print(f'Accuracy of the network on the 10000 test images: {accuracy:.2f}% | Total PFLOPs: {total_pflops:.9f}')
+    atf = accuracy / max(1e-6, tflops)
+
+    print(f'Accuracy of the network on the 10000 test images: {accuracy:.2f}% |Total TFLOPs: {tflops:.6f} | ATF: {atf:.2f}%/TFLOP')
 
     # Feedback Loop (Geometric Shock)
     if accuracy - prev_accuracy < 0.5:
