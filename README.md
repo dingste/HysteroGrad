@@ -1,3 +1,11 @@
+# **Important notice**
+
+I know this is annoying: you click on a link to something exciting, and then you get a disclaimer like this... Development on Hysterograd is being **discontinued**. Or rather, it will no longer be continued **here**. I've seen that there's still a lot of room for **improvement** and would like to explore that further elsewhere.
+
+What remains is the latest version, which I already consider exclusive.
+
+---
+
 # HysteroGrad: Hysteretic Information-Geometric Optimizer
 
 **HysteroGrad** is a next-generation PyTorch optimizer that redefines parameter updates as a physical phase transition. By merging **Information Geometry** with **Hysteresis Physics**, it creates a system that doesn't just minimize loss, but evolves through "Liquid" and "Frozen" states.
